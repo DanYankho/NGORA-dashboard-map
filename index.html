@@ -47,7 +47,7 @@
 
     /* Districts */
     .district {
-      stroke: rgba(255,255,255,0.55);
+      stroke: #000;
       stroke-width: 0.8px;
       cursor: pointer;
       transition: stroke-width 120ms ease, filter 120ms ease, opacity 120ms ease;
@@ -75,7 +75,7 @@
       transition: opacity 300ms ease;
       letter-spacing: 0.3px;
       paint-order: stroke fill;
-      stroke: rgba(0,0,0,0.2);
+      stroke: #fff;
       stroke-width: 2.5px;
     }
     .district-label.hidden { opacity: 0; }
@@ -562,7 +562,7 @@
     panelBg(ctx,PW,PH);
 
     // Header section
-    sectionLabel(ctx,'District Rankings',22,26);
+    sectionLabel(ctx,'District NGO Totals',22,26);
     bigHeading(ctx,'Top Districts',22,55,PW);
     divider(ctx,70,PW);
 
@@ -609,7 +609,7 @@
       // Local · Intl sub-text
       ctx.fillStyle=SUB;
       ctx.font=`500 11px ${F}`;
-      ctx.fillText(`${d.local.toLocaleString()} local  ·  ${d.intl.toLocaleString()} intl`,padX+36,y+31);
+      ctx.fillText(`${d.local.toLocaleString()} local  ·  ${d.intl.toLocaleString()} international`,padX+36,y+31);
 
       // Total count — right
       ctx.fillStyle=ACCENT;
