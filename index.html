@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Malawi NGO Distribution Map</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    :root {
+      --accent: #0808DA;
+      --accent-dark: #0d2136;
+      --tv-margin: 3%;
+    }
+    html, body {
+      height: 100%; margin: 0; padding: 0;
+      background: #A7A7A7;
+      font-family: 'Libre Franklin', 'Segoe UI', Roboto, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+      color: #111;
+    }
+
+    #map-root {
+      position: absolute;
+      width: 100vw; height: 100vh;
+      left: 0; top: 0;
+      overflow: hidden;
+    }
+    svg { width: 100%; height: 100%; display: block; }
+
+    .district {
+      stroke: #333;
+      stroke-width: 0.5px;
+      cursor: pointer;
+      transition: stroke-width 120ms ease, filter 120ms ease, opacity 120ms ease;
+      paint-order: stroke;
+    }
+    .district:hover { stroke-width: 2px; filter: drop-shadow(0 2px 10px rgba(0,0,0,0.18)); }
+    .lake { fill: #cfe9ff; stroke: #9fc7ee; stroke-width: 0.4px; }
+    .faded { opacity: 0.12; }
+    .focused { stroke-width: 1.5px; filter: drop-shadow(0 2px 14px rgba(8,8,218,0.5)); }
+
+    .district-label {
+      font-size: 10px;
+      font-weight: bold;
+      fill: #fff;
+      text-shadow: 0 0 3px rgba(0,0,0,0.5);
+      text-anchor: middle;
+      pointer-events: none;
+      user-select: none;
+      transition: opacity 300ms ease;
+      paint-order: stroke fill;
+      stroke: rgba(0,0,0,0.35);
+      stroke-width: 2px;
+    }
+    .district-label.hidden { opacity: 0; }
+
+    /* Canvas panels */
+    .canvas-panel {
+      position: absolute;
+      z-index: 60;
+      border-radius: 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+      overflow: hidden;
+      opacity: 1; visibility: visible;
+      transition: opacity 300ms ease, visibility 300ms ease;
+    }
+    .canvas-panel.faded { opacity: 0; visibility: hidden; }
+
+    .panel-top-districts {
+      right: var(--tv-margin);
+      top: 3%;
+      width: 420px;
+    }
+    .panel-overview {
+      left: var(--tv-margin);
+      top: 3%;
+      width: 320px;
+    }
+
+    /* Loading */
+    .loading {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%,-50%);
+      z-index: 1000;
+      background: rgba(255,255,255,0.9);
+      padding: 20px; border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .loading-spinner {
+      width: 24px; height: 24px;
+      border: 3px solid rgba(0,0,0,0.1);
+      border-radius: 50%;
+      border-top-color: var(--accent);
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Hint footer */
+    .keyboard-hint {
+      position: absolute;
+      bottom: var(--tv-margin);
+      left: var(--tv-margin);
+      background: #fff;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 15px;
+      z-index: 50;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      transition: opacity 300ms ease, visibility 300ms ease;
+    }
+    .keyboard-hint.faded { opacity: 0; visibility: hidden; }
+
+    /* Powered by */
+    .powered-by-footer {
+      position: absolute;
+      right: var(--tv-margin);
+      bottom: var(--tv-margin);
+      background: #fff;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 15px;
+      z-index: 50;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      display: flex; align-items: center; gap: 10px;
+    }
+    .powered-by-logo { height: 40px; width: auto; }
+
+    /* Colour legend */
+    .legend {
+      position: absolute;
+      left: var(--tv-margin);
+      bottom: calc(var(--tv-margin) + 70px);
+      background: #fff;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      z-index: 50;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+      transition: opacity 300ms ease, visibility 300ms ease;
+    }
+    .legend.faded { opacity: 0; visibility: hidden; }
+    .legend-title { font-weight: 700; color: var(--accent-dark); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 6px; }
+    .legend-bar {
+      width: 180px; height: 10px; border-radius: 5px;
+      background: linear-gradient(90deg, #dde4ff, #0808DA);
+      margin-bottom: 4px;
+    }
+    .legend-labels { display: flex; justify-content: space-between; font-size: 11px; color: #555; }
+
+    /* Nav buttons */
+    .navigation-buttons {
+      position: absolute;
+      left: var(--tv-margin);
+      bottom: calc(var(--tv-margin) + 175px);
+      display: flex; gap: 12px;
+      z-index: 70;
+    }
+    .nav-button {
+      background: rgba(13,33,54,0.88);
+      color: white;
+      border: none; border-radius: 10px;
+      padding: 8px 14px;
+      font-size: 14px; font-weight: 600;
+      cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-width: 56px;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    }
+    .nav-button:hover { background: rgba(13,33,54,1); transform: translateY(-2px); }
+    .nav-button:active { transform: translateY(0); }
+    .nav-button .icon { font-size: 22px; margin-bottom: 2px; }
+    .nav-button .label { font-size: 11px; opacity: 0.85; }
+
+    /* Help modal */
+    .help-modal {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.7);
+      display: none; align-items: center; justify-content: center;
+      z-index: 1000;
+    }
+    .help-modal.visible { display: flex; }
+    .help-content {
+      background: white; border-radius: 12px;
+      padding: 30px; max-width: 560px; max-height: 80vh; overflow-y: auto;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+    .help-content h2 { color: var(--accent-dark); margin-bottom: 20px; font-size: 26px; }
+    .help-section { margin-bottom: 18px; }
+    .help-section h3 { color: var(--accent-dark); margin-bottom: 8px; font-size: 17px; }
+    .help-section ul { list-style: none; padding: 0; }
+    .help-section li { margin-bottom: 7px; padding-left: 18px; position: relative; font-size: 14px; }
+    .help-section li:before { content: "•"; color: var(--accent); position: absolute; left: 0; }
+    .kbd { display: inline-block; background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-family: monospace; font-size: 12px; margin: 0 3px; }
+    .close-help {
+      background: var(--accent-dark); color: white;
+      border: none; border-radius: 6px; padding: 9px 18px;
+      font-size: 15px; cursor: pointer; margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map-root">
+  <svg id="map-svg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
+
+  <!-- Canvas panels -->
+  <canvas id="panel-top-districts" class="canvas-panel panel-top-districts"></canvas>
+  <canvas id="panel-overview"      class="canvas-panel panel-overview"></canvas>
+
+  <div id="loading" class="loading" style="display:none;">
+    <div class="loading-spinner"></div>
+    <span>Loading NGO data...</span>
+  </div>
+
+  <!-- Colour legend -->
+  <div class="legend" id="mapLegend">
+    <div class="legend-title">NGOs per District</div>
+    <div class="legend-bar"></div>
+    <div class="legend-labels"><span>Fewer</span><span>More</span></div>
+  </div>
+
+  <div class="keyboard-hint" id="kbHint">
+    <span>NGORA · Registered NGO Registry · Malawi</span>
+  </div>
+
+  <div class="powered-by-footer">
+    <span style="font-weight:500;color:#333;">Powered by</span>
+    <img src="data/mapLogo.png" alt="Logo" class="powered-by-logo">
+  </div>
+</div>
+
+<!-- Navigation -->
+<div class="navigation-buttons">
+  <button class="nav-button" id="help-button">
+    <span class="icon">?</span>
+    <span class="label">Help</span>
+  </button>
+</div>
+
+<!-- Help Modal -->
+<div class="help-modal" id="help-modal">
+  <div class="help-content">
+    <h2>NGO Distribution Map — Guide</h2>
+    <div class="help-section">
+      <h3>Map Colours</h3>
+      <ul>
+        <li>Deeper blue = more NGOs registered in that district</li>
+        <li>Light blue = fewer NGOs; near-white = very few</li>
+        <li>Colour scale uses a square-root curve to show variation across smaller districts</li>
+      </ul>
+    </div>
+    <div class="help-section">
+      <h3>District Interaction</h3>
+      <ul>
+        <li>Click any district to zoom in and see its NGO breakdown</li>
+        <li>Click again or press <span class="kbd">ESC</span> to zoom out</li>
+        <li>Hold <span class="kbd">Shift</span> + district abbreviation (e.g. <span class="kbd">Shift+LL</span> for Lilongwe) to jump to that district</li>
+      </ul>
+    </div>
+    <div class="help-section">
+      <h3>Panels</h3>
+      <ul>
+        <li><strong>Top Districts (right)</strong> — Top 10 districts ranked by total NGO count</li>
+        <li><strong>NGO Overview (left)</strong> — National totals: local vs international breakdown</li>
+        <li><strong>District Detail (left, when selected)</strong> — That district's full NGO breakdown with national context</li>
+        <li>Use <span class="kbd">↑</span> / <span class="kbd">↓</span> arrows or click arrows inside panels to page through results</li>
+      </ul>
+    </div>
+    <button class="close-help" id="close-help">Close</button>
+  </div>
+</div>
+
+<script>
+(async function(){
+
+  // ═══ CONSTANTS ═══
+  const ACCENT      = '#0808DA';
+  const ACCENT_DARK = '#0d2136';
+  const LIGHT_BG    = '#dde4ff';
+  const FONT        = '"Libre Franklin","Segoe UI",Roboto,Arial,sans-serif';
+
+  // ═══ ABBREVIATION MAP ═══
+  const ABBR = {
+    "CHITIPA":"CP","KARONGA":"KA","LIKOMA":"LK","MZIMBA":"MZ",
+    "NKHATA BAY":"NB","NKHATABAY":"NB","RUMPHI":"RU","DEDZA":"DZ",
+    "DOWA":"DA","KASUNGU":"KU","LILONGWE":"LL","MCHINJI":"MC",
+    "NKHOTAKOTA":"KK","NENO":"NN","NTCHEU":"NU","NTCHISI":"NS",
+    "SALIMA":"SA","BALAKA":"BK","BLANTYRE":"BT","CHIKWAWA":"CK",
+    "CHIKHWAWA":"CK","CHIRADZULU":"CR","MACHINGA":"MA","MANGOCHI":"MHG",
+    "MULANJE":"MU","MWANZA":"MW","NSANJE":"NE","PHALOMBE":"PE",
+    "THYOLO":"TO","ZOMBA":"ZA"
+  };
+  const LABEL_OFFSETS = { "CHITIPA":{ x:-5,y:-20 }, "LIKOMA":{ x:0,y:15 } };
+
+  // ═══ STATE ═══
+  let geoData=null, ngoData=null;
+  let districtSel=null, lakeSel=null, labelSel=null, zoomBehavior=null;
+  let selectedFeature=null, selectedFeatureId=null;
+  let districtCanvas=null, districtCtx=null;
+  let topPage=0; // pagination for top-districts panel
+
+  // ═══ DOM ═══
+  const mapRoot  = document.getElementById('map-root');
+  const svg      = d3.select('#map-svg');
+  let W = mapRoot.clientWidth, H = mapRoot.clientHeight;
+  svg.attr('viewBox',`0 0 ${W} ${H}`);
+  const mapGroup = svg.append('g').attr('id','mapGroup');
+
+  const topCanvas = document.getElementById('panel-top-districts');
+  const ovCanvas  = document.getElementById('panel-overview');
+
+  // ═══ HIGH-DPI CANVAS ═══
+  function hiDPI(canvas, w, h){
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width  = w + 'px';
+    canvas.style.height = h + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return ctx;
+  }
+  const topCtx = hiDPI(topCanvas, 420, 440);
+  const ovCtx  = hiDPI(ovCanvas,  320, 290);
+
+  // ═══ HELPERS ═══
+  function norm(s){ return s ? s.trim().toUpperCase().replace(/\s+/g,' ') : ''; }
+
+  function titleCase(s){
+    return s ? s.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : '';
+  }
+
+  function featName(feat){
+    const p = (feat && feat.properties) || {};
+    for(const k of ['NAME_1','NAME','DISTRICT','Dist_Name','DISTRICT NAME','DISTNAME','DIST_NAME','district','District']){
+      if(p[k] && typeof p[k]==='string' && p[k].trim()) return p[k];
+    }
+    return '';
+  }
+
+  function getAbbr(name){ return ABBR[norm(name)] || norm(name).slice(0,2); }
+
+  // Flexible district lookup handles spelling variants
+  function lookupDistrict(rawName){
+    if(!ngoData) return null;
+    const n = norm(rawName);
+    if(ngoData.districts[n]) return ngoData.districts[n];
+    // Try without spaces
+    const ns = n.replace(/\s+/g,'');
+    for(const k of Object.keys(ngoData.districts)){
+      if(k.replace(/\s+/g,'') === ns) return ngoData.districts[k];
+    }
+    return null;
+  }
+
+  // ═══ COLOR SCALE ═══
+  let maxCount = 1;
+  const colorInterp = d3.interpolateRgb(LIGHT_BG, ACCENT);
+  function distColor(count){
+    if(!count) return '#f0f0ff';
+    return colorInterp(Math.sqrt(count / maxCount));
+  }
+  // Label color: white on dark backgrounds
+  function labelColor(count){
+    const t = Math.sqrt((count||0) / maxCount);
+    return t > 0.4 ? '#ffffff' : '#222222';
+  }
+
+  // ═══ LOAD DATA ═══
+  async function loadNGO(){
+    const rows = await d3.csv('data/data.csv');
+    const districts = {};
+    let totalLocal=0, totalIntl=0;
+
+    rows.forEach(r => {
+      const district = norm(r.district || r.DISTRICT || r.District || '');
+      const type     = (r.type || r.TYPE || r.Type || '').trim();
+      const name     = (r.name || r.NAME || r.Name || '').trim();
+      if(!district) return;
+
+      if(!districts[district]) districts[district] = { total:0, local:0, intl:0 };
+      districts[district].total++;
+      if(type === 'Local')         { districts[district].local++; totalLocal++; }
+      else if(type === 'International') { districts[district].intl++;  totalIntl++;  }
+    });
+
+    const total = totalLocal + totalIntl;
+    const topDistricts = Object.entries(districts)
+      .map(([name,s]) => ({ name, ...s }))
+      .sort((a,b) => b.total - a.total);
+
+    maxCount = topDistricts.length ? topDistricts[0].total : 1;
+
+    return { total, local:totalLocal, intl:totalIntl, districts, topDistricts };
+  }
+
+  // ═══ PROJECTION ═══
+  const proj = d3.geoMercator()
+    .center([34.3015,-13.2543])
+    .scale(Math.min(W,H)*6.5)
+    .translate([W/2, H/2]);
+  const path = d3.geoPath().projection(proj);
+
+  function updateProjection(){
+    W = mapRoot.clientWidth; H = mapRoot.clientHeight;
+    svg.attr('viewBox',`0 0 ${W} ${H}`);
+    proj.scale(Math.min(W,H)*6.5).translate([W/2,H/2]);
+    path.projection(proj);
+  }
+
+  // ═══ PANEL DRAWING HELPERS ═══
+  function clearPanel(ctx, canvas){
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.scale(dpr, dpr);
+  }
+
+  function panelBg(ctx, W, H){
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(0,0,W,H);
+  }
+
+  function panelTitle(ctx, text, W){
+    ctx.fillStyle = ACCENT_DARK;
+    ctx.font = `700 32px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillText(text, 20, 44);
+    ctx.fillStyle = ACCENT;
+    ctx.fillRect(20, 52, W-40, 2);
+  }
+
+  function drawArrow(ctx, x, y, dir, active, size=26){
+    ctx.save();
+    ctx.fillStyle = active ? 'rgba(13,33,54,0.8)' : 'rgba(200,200,200,0.4)';
+    ctx.beginPath();
+    if(dir==='down'){ ctx.moveTo(x-size/2,y-size/3); ctx.lineTo(x+size/2,y-size/3); ctx.lineTo(x,y+size/3); }
+    else            { ctx.moveTo(x-size/2,y+size/3); ctx.lineTo(x+size/2,y+size/3); ctx.lineTo(x,y-size/3); }
+    ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+
+  // ═══ DRAW: TOP DISTRICTS PANEL (right) ═══
+  function drawTopPanel(){
+    const ctx = topCtx;
+    const canvas = topCanvas;
+    clearPanel(ctx, canvas);
+    const PW = canvas.width / (window.devicePixelRatio||1);
+    const PH = canvas.height / (window.devicePixelRatio||1);
+
+    panelBg(ctx, PW, PH);
+    panelTitle(ctx, 'Top Districts', PW);
+
+    if(!ngoData){ return; }
+
+    const perPage = 5;
+    const list    = ngoData.topDistricts.slice(0, 10);
+    const totalPg = Math.ceil(list.length / perPage);
+    const start   = topPage * perPage;
+    const slice   = list.slice(start, Math.min(start + perPage, list.length));
+
+    let y = 80;
+    const rowH = 66;
+
+    slice.forEach((d, i) => {
+      const rank = start + i + 1;
+      const pct  = d.total / maxCount;
+      const barW = (PW - 40) * pct;
+
+      // Row bg
+      ctx.fillStyle = 'rgba(0,0,0,0.03)';
+      ctx.fillRect(10, y - 26, PW - 20, rowH - 4);
+
+      // Intensity bar
+      ctx.globalAlpha = 0.28;
+      ctx.fillStyle = ACCENT;
+      ctx.fillRect(20, y - 20, barW, rowH - 16);
+      ctx.globalAlpha = 1;
+
+      // Rank
+      ctx.fillStyle = '#aaa';
+      ctx.font = `600 13px ${FONT}`;
+      ctx.textAlign = 'left';
+      ctx.fillText(`#${rank}`, 24, y - 2);
+
+      // Name
+      ctx.fillStyle = '#111';
+      ctx.font = `700 20px ${FONT}`;
+      ctx.fillText(titleCase(d.name), 55, y - 2);
+
+      // Local · Intl breakdown
+      ctx.fillStyle = '#666';
+      ctx.font = `400 13px ${FONT}`;
+      ctx.fillText(`${d.local.toLocaleString()} local  ·  ${d.intl.toLocaleString()} intl`, 55, y + 16);
+
+      // Total count
+      ctx.fillStyle = ACCENT_DARK;
+      ctx.font = `700 24px ${FONT}`;
+      ctx.textAlign = 'right';
+      ctx.fillText(d.total.toLocaleString(), PW - 22, y - 1);
+
+      y += rowH;
+    });
+
+    // Pagination
+    if(totalPg > 1){
+      const py = PH - 30;
+      ctx.fillStyle = '#888';
+      ctx.font = `500 13px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`${topPage+1} / ${totalPg}`, PW/2, py+4);
+      drawArrow(ctx, PW/2 - 70, py, 'up',   topPage > 0);
+      drawArrow(ctx, PW/2 + 70, py, 'down', topPage < totalPg-1);
+    }
+  }
+
+  // ═══ DRAW: OVERVIEW PANEL (left) ═══
+  function drawOverviewPanel(){
+    const ctx = ovCtx;
+    const canvas = ovCanvas;
+    clearPanel(ctx, canvas);
+    const PW = canvas.width / (window.devicePixelRatio||1);
+    const PH = canvas.height / (window.devicePixelRatio||1);
+
+    panelBg(ctx, PW, PH);
+    panelTitle(ctx, 'NGO Overview', PW);
+
+    if(!ngoData) return;
+
+    const barW = PW - 40;
+
+    // TOTAL big number
+    ctx.fillStyle = '#999';
+    ctx.font = `500 10px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillText('TOTAL REGISTERED ORGANISATIONS', 20, 72);
+
+    ctx.fillStyle = ACCENT_DARK;
+    ctx.font = `700 50px ${FONT}`;
+    ctx.fillText(ngoData.total.toLocaleString(), 20, 118);
+
+    // LOCAL row
+    let y = 155;
+    const rowH = 56;
+    const localFrac = ngoData.local / ngoData.total;
+    const intlFrac  = ngoData.intl  / ngoData.total;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.04)';
+    ctx.fillRect(10, y-20, PW-20, rowH-4);
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = '#4477E8';
+    ctx.fillRect(20, y-14, barW*localFrac, rowH-16);
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = '#111';
+    ctx.font = `700 17px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillText('Local', 24, y+2);
+    ctx.fillStyle = '#777';
+    ctx.font = `400 12px ${FONT}`;
+    ctx.fillText(`${(localFrac*100).toFixed(1)}% of total`, 24, y+18);
+    ctx.fillStyle = '#222';
+    ctx.font = `700 22px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(ngoData.local.toLocaleString(), PW-18, y+2);
+
+    y += rowH + 4;
+
+    // INTERNATIONAL row
+    ctx.fillStyle = 'rgba(0,0,0,0.04)';
+    ctx.fillRect(10, y-20, PW-20, rowH-4);
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = ACCENT;
+    ctx.fillRect(20, y-14, barW*intlFrac, rowH-16);
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle = '#111';
+    ctx.font = `700 17px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillText('International', 24, y+2);
+    ctx.fillStyle = '#777';
+    ctx.font = `400 12px ${FONT}`;
+    ctx.fillText(`${(intlFrac*100).toFixed(1)}% of total`, 24, y+18);
+    ctx.fillStyle = '#222';
+    ctx.font = `700 22px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(ngoData.intl.toLocaleString(), PW-18, y+2);
+
+    y += rowH + 4;
+
+    // DISTRICTS row
+    ctx.fillStyle = 'rgba(0,0,0,0.03)';
+    ctx.fillRect(10, y-20, PW-20, 42);
+    ctx.fillStyle = '#111';
+    ctx.font = `700 17px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillText('Districts', 24, y+2);
+    ctx.fillStyle = '#222';
+    ctx.font = `700 22px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(ngoData.topDistricts.length.toString(), PW-18, y+2);
+  }
+
+  // ═══ DRAW: DISTRICT DETAIL PANEL ═══
+  function drawDistrictPanel(feature){
+    // Create canvas if needed
+    if(!districtCanvas){
+      districtCanvas = document.createElement('canvas');
+      districtCanvas.id = 'panel-district';
+      districtCanvas.className = 'canvas-panel';
+      Object.assign(districtCanvas.style, {
+        position:'absolute', left:'3%', top:'3%',
+        zIndex:'60', borderRadius:'12px',
+        boxShadow:'0 8px 24px rgba(0,0,0,0.12)'
+      });
+      document.getElementById('map-root').appendChild(districtCanvas);
+      districtCtx = hiDPI(districtCanvas, 430, 500);
+      districtCanvas.style.width  = '430px';
+      districtCanvas.style.height = '500px';
+    }
+
+    const ctx = districtCtx;
+    const canvas = districtCanvas;
+    clearPanel(ctx, canvas);
+    const PW = canvas.width / (window.devicePixelRatio||1);
+    const PH = canvas.height / (window.devicePixelRatio||1);
+
+    panelBg(ctx, PW, PH);
+
+    const rawName = featName(feature);
+    const stats   = lookupDistrict(rawName) || { total:0, local:0, intl:0 };
+    const rank    = ngoData.topDistricts.findIndex(d => lookupDistrict(d.name) === stats) + 1 || '—';
+    const avg     = (ngoData.total / (ngoData.topDistricts.length || 1));
+    const natPct  = ngoData.total ? ((stats.total / ngoData.total)*100).toFixed(1) : '0.0';
+    const vsAvg   = avg > 0 ? (stats.total / avg).toFixed(1) : '—';
+
+    // District name — big
+    ctx.fillStyle = ACCENT_DARK;
+    ctx.font = `700 46px ${FONT}`;
+    ctx.textAlign = 'left';
+    // Truncate if too long
+    let dname = titleCase(rawName) || 'Unknown District';
+    while(ctx.measureText(dname).width > PW - 40 && dname.length > 3){
+      dname = dname.slice(0,-1);
+    }
+    ctx.fillText(dname, 20, 52);
+
+    // Subtitle
+    ctx.fillStyle = '#666';
+    ctx.font = `500 18px ${FONT}`;
+    ctx.fillText('NGO Registration Summary', 20, 78);
+
+    // Underline
+    ctx.fillStyle = ACCENT;
+    ctx.fillRect(20, 90, PW-40, 2);
+
+    // TOTAL — large centred number
+    ctx.fillStyle = '#aaa';
+    ctx.font = `500 10px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillText('TOTAL NGOs IN DISTRICT', 20, 116);
+
+    ctx.fillStyle = ACCENT_DARK;
+    ctx.font = `700 72px ${FONT}`;
+    ctx.fillText(stats.total.toLocaleString(), 20, 185);
+
+    // Local / Intl bars
+    const barW   = PW - 40;
+    const localF = stats.total ? stats.local / stats.total : 0;
+    const intlF  = stats.total ? stats.intl  / stats.total : 0;
+    let y = 210;
+    const rowH = 60;
+
+    // LOCAL
+    ctx.fillStyle = 'rgba(0,0,0,0.04)';
+    ctx.fillRect(10, y-18, PW-20, rowH-4);
+    ctx.globalAlpha = 0.38;
+    ctx.fillStyle = '#4477E8';
+    ctx.fillRect(20, y-12, barW*localF, rowH-16);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#111';
+    ctx.font = `700 18px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillText('Local NGOs', 24, y+4);
+    ctx.fillStyle = '#777';
+    ctx.font = `400 13px ${FONT}`;
+    ctx.fillText(`${(localF*100).toFixed(1)}% of district`, 24, y+22);
+    ctx.fillStyle = '#222';
+    ctx.font = `700 26px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(stats.local.toLocaleString(), PW-18, y+6);
+
+    y += rowH + 6;
+
+    // INTERNATIONAL
+    ctx.fillStyle = 'rgba(0,0,0,0.04)';
+    ctx.fillRect(10, y-18, PW-20, rowH-4);
+    ctx.globalAlpha = 0.38;
+    ctx.fillStyle = ACCENT;
+    ctx.fillRect(20, y-12, barW*intlF, rowH-16);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#111';
+    ctx.font = `700 18px ${FONT}`;
+    ctx.textAlign = 'left';
+    ctx.fillText('International NGOs', 24, y+4);
+    ctx.fillStyle = '#777';
+    ctx.font = `400 13px ${FONT}`;
+    ctx.fillText(`${(intlF*100).toFixed(1)}% of district`, 24, y+22);
+    ctx.fillStyle = '#222';
+    ctx.font = `700 26px ${FONT}`;
+    ctx.textAlign = 'right';
+    ctx.fillText(stats.intl.toLocaleString(), PW-18, y+6);
+
+    y += rowH + 16;
+
+    // Divider
+    ctx.strokeStyle = 'rgba(0,0,0,0.07)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(20,y); ctx.lineTo(PW-20,y); ctx.stroke();
+    y += 20;
+
+    // National context — 3 columns
+    const cols = [
+      { label:'NATIONAL RANK',  value: rank ? `#${rank}` : '—'  },
+      { label:'OF ALL NGOs',    value: `${natPct}%`              },
+      { label:'vs. AVG DISTRICT', value: `${vsAvg}×`            }
+    ];
+    const colW = (PW - 40) / 3;
+    cols.forEach((col, i) => {
+      const cx = 20 + i*colW + colW/2;
+      ctx.fillStyle = '#999';
+      ctx.font = `500 9px ${FONT}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(col.label, cx, y);
+      ctx.fillStyle = ACCENT_DARK;
+      ctx.font = `700 24px ${FONT}`;
+      ctx.fillText(col.value, cx, y + 28);
+    });
+  }
+
+  // ═══ ZOOM ═══
+  function initZoom(){
+    zoomBehavior = d3.zoom().scaleExtent([1,12]).on('zoom', e => {
+      mapGroup.attr('transform', e.transform);
+    });
+    svg.call(zoomBehavior);
+  }
+
+  function focusOnFeature(feat){
+    const b = path.bounds(feat);
+    const dx = b[1][0]-b[0][0], dy = b[1][1]-b[0][1];
+    const cx = (b[0][0]+b[1][0])/2, cy = (b[0][1]+b[1][1])/2;
+    const sc = Math.max(1, Math.min(12, 0.9/Math.max(dx/(W*0.6), dy/H)));
+    const tx = W*0.65 - sc*cx, ty = H/2 - sc*cy;
+    svg.transition().duration(2400)
+      .call(zoomBehavior.transform, d3.zoomIdentity.translate(tx,ty).scale(sc));
+  }
+
+  function resetView(){
+    selectedFeature   = null;
+    selectedFeatureId = null;
+    svg.transition().duration(1800).call(zoomBehavior.transform, d3.zoomIdentity);
+    if(districtSel){ districtSel.classed('faded',false).classed('focused',false); }
+    if(labelSel)   { labelSel.classed('hidden',false); }
+    if(districtCanvas){ districtCanvas.remove(); districtCanvas=null; districtCtx=null; }
+    topCanvas.classList.remove('faded');
+    ovCanvas.classList.remove('faded');
+    d3.select('#kbHint').classed('faded',false);
+    d3.select('#mapLegend').classed('faded',false);
+    topPage = 0;
+    drawTopPanel();
+  }
+
+  // ═══ CLICK ═══
+  function onDistrictClick(event, d){
+    const id = d.id || (d.properties&&(d.properties.id||d.properties.NAME_1||d.properties.DISTRICT)) || null;
+    if(selectedFeature && selectedFeatureId===id){ resetView(); return; }
+
+    selectedFeature   = d;
+    selectedFeatureId = id;
+
+    d3.select('#kbHint').classed('faded',true);
+    d3.select('#mapLegend').classed('faded',true);
+    focusOnFeature(d);
+
+    districtSel.classed('faded', dd => dd !== d);
+    d3.select(this).classed('faded',false).classed('focused',true).raise();
+    labelSel.classed('hidden',true);
+
+    topCanvas.classList.add('faded');
+    ovCanvas.classList.add('faded');
+
+    drawDistrictPanel(d);
+  }
+
+  // ═══ PANEL CLICK (pagination) ═══
+  function setupCanvasClicks(){
+    topCanvas.addEventListener('click', e => {
+      const rect = topCanvas.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      if(y < rect.height - 70) return; // Only bottom zone
+
+      const list = ngoData.topDistricts.slice(0,10);
+      const totalPg = Math.ceil(list.length / 5);
+      const x = e.clientX - rect.left;
+
+      if(x < rect.width/2 && topPage > 0)          { topPage--; drawTopPanel(); }
+      else if(x >= rect.width/2 && topPage < totalPg-1){ topPage++; drawTopPanel(); }
+    });
+  }
+
+  // ═══ KEYBOARD ═══
+  function setupKeyboard(){
+    document.addEventListener('keydown', e => {
+
+      if(e.key==='Escape'){ resetView(); return; }
+
+      // Up/Down pagination on top-districts panel
+      if(!topCanvas.classList.contains('faded')){
+        const list = ngoData?.topDistricts?.slice(0,10) || [];
+        const totalPg = Math.ceil(list.length/5);
+        if(e.key==='ArrowDown' && topPage < totalPg-1){ e.preventDefault(); topPage++; drawTopPanel(); }
+        if(e.key==='ArrowUp'   && topPage > 0)        { e.preventDefault(); topPage--; drawTopPanel(); }
+      }
+
+      // Shift + letters → district abbreviation jump
+      if(e.shiftKey && e.key.length===1 && /[A-Za-z]/.test(e.key)){
+        e.preventDefault();
+        window._abInput = (window._abInput||'') + e.key.toUpperCase();
+        clearTimeout(window._abTimer);
+        window._abTimer = setTimeout(() => {
+          jumpToAbbr(window._abInput);
+          window._abInput = '';
+        }, 300);
+      }
+    });
+  }
+
+  function jumpToAbbr(abbr){
+    if(!geoData) return;
+    const feat = geoData.features.find(f => {
+      const dn = norm(featName(f));
+      return getAbbr(dn) === abbr;
+    });
+    if(!feat) return;
+    const id = feat.id||(feat.properties&&(feat.properties.id||feat.properties.NAME_1||feat.properties.DISTRICT))||null;
+    if(selectedFeature && selectedFeatureId===id){ resetView(); return; }
+    selectedFeature=feat; selectedFeatureId=id;
+    d3.select('#kbHint').classed('faded',true);
+    d3.select('#mapLegend').classed('faded',true);
+    focusOnFeature(feat);
+    districtSel.classed('faded', d => d !== feat);
+    districtSel.filter(d => d===feat).classed('faded',false).classed('focused',true).raise();
+    labelSel.classed('hidden',true);
+    topCanvas.classList.add('faded');
+    ovCanvas.classList.add('faded');
+    drawDistrictPanel(feat);
+  }
+
+  // ═══ MAIN ═══
+  try {
+    d3.select('#loading').style('display','flex');
+
+    const [geo, ngo] = await Promise.all([
+      d3.json('data/malawi_districts.geojson'),
+      loadNGO()
+    ]);
+    geoData = geo;
+    ngoData = ngo;
+
+    updateProjection();
+
+    function isLake(f){
+      const p = f.properties||{};
+      const t = (p.TYPE||p.type||'').toLowerCase();
+      const n = (p.NAME||p.NAME_1||p.name||'').toLowerCase();
+      return t.includes('lake')||n.includes('lake');
+    }
+
+    const features  = geoData.features||[];
+    const lakes     = features.filter(isLake);
+    const districts = features.filter(f => !isLake(f));
+
+    svg.append('defs').html(`
+      <filter id="pulseEffect" x="-20%" y="-20%" width="140%" height="140%">
+        <feGaussianBlur in="SourceGraphic" stdDeviation="2" result="blur"/>
+        <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0 0 1 0 0 0 0 0 1 0 0 0 0 0 18 -7" result="pulse"/>
+        <feBlend in="SourceGraphic" in2="pulse" mode="screen"/>
+      </filter>
+    `);
+
+    lakeSel = mapGroup.append('g').attr('class','lakes')
+      .selectAll('path').data(lakes).enter()
+      .append('path').attr('class','lake').attr('d',path);
+
+    districtSel = mapGroup.append('g').attr('class','districts')
+      .selectAll('path').data(districts).enter()
+      .append('path')
+      .attr('class','district')
+      .attr('d', path)
+      .attr('fill', d => {
+        const s = lookupDistrict(featName(d));
+        return s ? distColor(s.total) : '#f0f0ff';
+      })
+      .on('click', onDistrictClick)
+      .on('mouseover', function(){ d3.select(this).classed('focused',true); })
+      .on('mouseout',  function(e,d){
+        const id = d.id||(d.properties&&(d.properties.id||d.properties.NAME_1||d.properties.DISTRICT))||null;
+        if(selectedFeatureId!==id) d3.select(this).classed('focused',false);
+      });
+
+    labelSel = mapGroup.append('g').attr('class','district-labels')
+      .selectAll('text').data(districts).enter()
+      .append('text')
+      .attr('class','district-label')
+      .attr('transform', d => {
+        const c  = path.centroid(d);
+        const dn = norm(featName(d));
+        const off = LABEL_OFFSETS[dn]||{x:0,y:0};
+        return `translate(${c[0]+off.x},${c[1]+off.y})`;
+      })
+      .attr('dy','0.35em')
+      .attr('fill', d => {
+        const s = lookupDistrict(featName(d));
+        return labelColor(s ? s.total : 0);
+      })
+      .text(d => getAbbr(featName(d)));
+
+    initZoom();
+    setupKeyboard();
+    setupCanvasClicks();
+
+    svg.on('click', e => {
+      if(e.target.tagName && e.target.tagName.toLowerCase()==='svg') resetView();
+    });
+
+    // Help
+    const helpBtn   = document.getElementById('help-button');
+    const helpModal = document.getElementById('help-modal');
+    const closeHelp = document.getElementById('close-help');
+    helpBtn.addEventListener('click',   () => helpModal.classList.add('visible'));
+    closeHelp.addEventListener('click', () => helpModal.classList.remove('visible'));
+    helpModal.addEventListener('click', e => { if(e.target===helpModal) helpModal.classList.remove('visible'); });
+
+    window.addEventListener('resize', () => {
+      clearTimeout(window._rt);
+      window._rt = setTimeout(() => {
+        updateProjection();
+        svg.selectAll('path').attr('d',path);
+        labelSel.attr('transform', d => {
+          const c  = path.centroid(d);
+          const dn = norm(featName(d));
+          const off = LABEL_OFFSETS[dn]||{x:0,y:0};
+          return `translate(${c[0]+off.x},${c[1]+off.y})`;
+        });
+      }, 250);
+    });
+
+    drawTopPanel();
+    drawOverviewPanel();
+
+    d3.select('#loading').style('display','none');
+    console.log(`Loaded ${ngoData.total} NGOs across ${ngoData.topDistricts.length} districts.`);
+
+  } catch(err){
+    console.error('Init error:', err);
+    d3.select('#loading').style('display','none');
+    alert('Error loading data. Check console for details.');
+  }
+
+})();
+</script>
+</body>
+</html>
